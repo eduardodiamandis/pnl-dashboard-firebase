@@ -4,8 +4,9 @@ from datetime import datetime
 
 # inicializa firebase
 if not firebase_admin._apps:
-    cred = credentials.Certificate(dict(st.secrets["FIREBASE"]))
-    firebase_admin.initialize_app(cred)
+    firebase_config = dict(st.secrets.get("firebase", {}))
+    cred = credentials.Certificate(firebase_config)
+    initialize_app(cred)
 
 db = firestore.client()
 
