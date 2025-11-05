@@ -8,10 +8,10 @@ from data_firebase import (
 )
 
 # Page configuration
-st.set_page_config(page_title="Trading System", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Trading System", layout="wide")
 
 # Title
-st.title("📊 Trading Management System")
+st.title(" Trading Management System")
 
 # Sidebar for navigation
 st.sidebar.title("Navigation")
@@ -176,4 +176,3 @@ elif page == "PNL Summary":
 
 # Footer
 st.sidebar.markdown("---")
-st.sidebar.info("Trading Management System v2.0")
