@@ -12,7 +12,7 @@ from data_firebase import (
 # Configuração da página
 # ---------------------------------------------
 st.set_page_config(page_title="PNL Dashboard", layout="wide")
-st.title("PNL Dashboard — Streamlit + Firebase")
+st.title("PNL Dashboard")
 
 # ---------------------------------------------
 # Helpers e constantes
@@ -154,4 +154,4 @@ elif page == "Graphs":
         st.info("No PNL data to display.")
 
 st.markdown("---")
-st.caption("PNL System — Streamlit + Firebase (month-based version)")
+
