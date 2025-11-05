@@ -1,124 +1,157 @@
 import streamlit as st
 import pandas as pd
+from decimal import Decimal
 from datetime import datetime
 from data_firebase import (
-    add_trade, add_mtm, add_pos,
-    get_trades, get_mtm, get_positions,
-    get_position_summary, get_pnl_summary,
-    get_mtm_by_trade
+    add_trade, add_mtm, add_pos, get_trades, get_mtm, get_positions,
+    update_trade, delete_trade, get_position_summary, get_pnl_summary,
+    get_unique_values, get_mtm_by_trade
 )
 
-# -------------------------------------------------
-# Helpers
-# -------------------------------------------------
+# ---------------------------------------------
+# Configuração da página
+# ---------------------------------------------
+st.set_page_config(page_title="PNL Dashboard", layout="wide")
+st.title("PNL Dashboard — Streamlit + Firebase")
+
+# ---------------------------------------------
+# Helpers e constantes
+# ---------------------------------------------
 PRODUCTS = ["SoyBean", "SoyMeal", "YelCorn"]
 CATEGORIES = ["FOB Vessel", "FOB Paper", "C&F Vessel"]
 MONTHS = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
 ]
+OPERATIONS = ["Purchase", "Sale"]
 
-def get_conversion_value(prod: str) -> float:
+# Conversão base usada no cálculo de notion
+def get_conversion_value(prod: str) -> Decimal:
     if prod == "SoyBean":
-        return 36.7454
+        return Decimal("36.7454")
     elif prod == "SoyMeal":
-        return 1.1023
+        return Decimal("1.1023")
     elif prod == "YelCorn":
-        return 39.3678
+        return Decimal("39.3678")
     else:
-        return 1.0
+        return Decimal("1")
 
+# ---------------------------------------------
+# Barra lateral
+# ---------------------------------------------
+st.sidebar.header("Navigation")
+page = st.sidebar.radio(
+    "Go to:",
+    ["Overview", "Insert Trade", "Insert MTM", "Trade Log", "Graphs"]
+)
 
-# -------------------------------------------------
-# Configuração inicial
-# -------------------------------------------------
-st.set_page_config(page_title="PNL Dashboard", layout="wide")
-st.title("PNL System — Firebase Version")
+# ---------------------------------------------
+# Overview
+# ---------------------------------------------
+if page == "Overview":
+    st.header("Overview by Product")
+    year = st.sidebar.number_input("Year", 2000, 2100, datetime.now().year)
 
+    cols = st.columns(3)
+    for i, prod in enumerate(PRODUCTS):
+        with cols[i]:
+            st.subheader(prod)
+            with st.spinner("Loading Data..."):
+                try:
+                    trades = pd.DataFrame(get_trades({"prod": prod, "year": year}))
+                    pnl = pd.DataFrame(get_pnl_summary({"prod": prod, "year": year}))
+                    pos = pd.DataFrame(get_position_summary())
+                except Exception as e:
+                    st.error(f"Error loading data: {e}")
+                    trades = pnl = pos = pd.DataFrame()
 
-# -------------------------------------------------
-# Tabs
-# -------------------------------------------------
-tabs = st.tabs(["Overview", "Insert Trade", "Insert MTM", "Trade Log", "PNL Summary"])
+            st.markdown("**Trades**")
+            st.dataframe(trades)
 
-# --- OVERVIEW ---
-with tabs[0]:
-    st.header("Overview")
-    with st.spinner("Loading data..."):
-        trades = get_trades()
-        mtm = get_mtm()
-        pos = get_positions()
+            st.markdown("**PNL**")
+            st.dataframe(pnl)
 
-    st.subheader("Trades")
-    st.dataframe(pd.DataFrame(trades))
+            st.markdown("**Positions**")
+            st.dataframe(pos)
 
-    st.subheader("MTM")
-    st.dataframe(pd.DataFrame(mtm))
-
-    st.subheader("Positions")
-    st.dataframe(pd.DataFrame(pos))
-
-
-# --- INSERT TRADE ---
-with tabs[1]:
-    st.header("Insert Trade")
+# ---------------------------------------------
+# Insert Trade
+# ---------------------------------------------
+elif page == "Insert Trade":
+    st.header("Insert New Trade")
     with st.form("trade_form"):
         col1, col2 = st.columns(2)
         with col1:
             prod = st.selectbox("Product", PRODUCTS)
             cat = st.selectbox("Category", CATEGORIES)
             month = st.selectbox("Month", MONTHS)
-            year = st.number_input("Year", min_value=2000, max_value=2100, value=datetime.now().year)
+            year = st.number_input("Year", 2000, 2100, datetime.now().year)
         with col2:
-            op = st.selectbox("Operation", ["Purchase", "Sale"])
-            ton = st.number_input("Tons", min_value=0.0, step=1.0, value=1.0)
-            lvl = st.number_input("Level", min_value=0.0, step=0.01)
-            notion = st.number_input("Notion", step=0.01)
+            op = st.selectbox("Operation", OPERATIONS)
+            ton = st.number_input("Tons", 0.0, step=1.0, value=1.0)
+            lvl = st.number_input("Level", min_value=0.0, step=0.01, value=100.0)
+            notion = float(get_conversion_value(prod)) * float(ton) * float(lvl)
 
-        submitted = st.form_submit_button("Add Trade")
-        if submitted:
-            try:
-                trade_id = add_trade(prod, cat, month, int(year), op, ton, lvl, notion)
-                if trade_id:
-                    st.success(f"Trade {trade_id} added successfully.")
-            except Exception as e:
-                st.error(f"Erro ao inserir trade: {e}")
+        submit = st.form_submit_button("Insert Trade")
 
+    if submit:
+        try:
+            trade_id = add_trade(prod, cat, month, year, op, ton, lvl, notion)
+            if trade_id:
+                st.success(f"Trade successfully added! ID: {trade_id}")
+        except Exception as e:
+            st.error(f"Error adding trade: {e}")
 
-# --- INSERT MTM ---
-with tabs[2]:
-    st.header("Insert MTM")
+# ---------------------------------------------
+# Insert MTM
+# ---------------------------------------------
+elif page == "Insert MTM":
+    st.header("Insert Mark-to-Market (MTM)")
     trades = get_trades({"status": "active"})
-    if trades:
-        trade_opt = {f"{t['prod']} ({t['month']}/{t['year']}) - {t['op']}": t['id'] for t in trades}
-        with st.form("mtm_form"):
-            selected = st.selectbox("Select Trade", list(trade_opt.keys()))
-            mtm_val = st.number_input("MTM Value", step=0.01)
-            pnl_val = st.number_input("PNL Value", step=0.01)
-            submitted = st.form_submit_button("Add MTM")
-            if submitted:
-                add_mtm(trade_opt[selected], mtm_val, pnl_val)
-    else:
+    if not trades:
         st.info("No active trades found.")
+    else:
+        trade_opt = {
+            f"{t['prod']} ({t.get('month', t.get('ship', 'N/A'))}/{t['year']}) - {t['op']}": t['id']
+            for t in trades
+        }
 
+        with st.form("mtm_form"):
+            selected_trade = st.selectbox("Select Trade", list(trade_opt.keys()))
+            mtm = st.number_input("MTM Value", step=0.01)
+            pnl = st.number_input("PNL Value", step=0.01)
+            submit = st.form_submit_button("Insert MTM")
 
-# --- TRADE LOG ---
-with tabs[3]:
+        if submit:
+            try:
+                add_mtm(trade_opt[selected_trade], mtm, pnl)
+            except Exception as e:
+                st.error(f"Error inserting MTM: {e}")
+
+# ---------------------------------------------
+# Trade Log
+# ---------------------------------------------
+elif page == "Trade Log":
     st.header("Trade Log")
     trades = get_trades()
     if trades:
         df = pd.DataFrame(trades)
         st.dataframe(df)
     else:
-        st.info("No trades available.")
+        st.info("No trades found.")
 
-
-# --- PNL SUMMARY ---
-with tabs[4]:
-    st.header("PNL Summary")
-    pnl = get_pnl_summary()
-    if pnl:
-        df = pd.DataFrame(pnl)
-        st.dataframe(df)
+# ---------------------------------------------
+# Graphs (PNL Visualization)
+# ---------------------------------------------
+elif page == "Graphs":
+    st.header("PNL Graphs")
+    prod = st.selectbox("Select Product", PRODUCTS)
+    pnl_data = get_pnl_summary({"prod": prod})
+    if pnl_data:
+        df = pd.DataFrame(pnl_data)
+        st.line_chart(df.set_index("year")[["total_pnl"]])
     else:
-        st.info("No PNL data found.")
+        st.info("No PNL data to display.")
+
+st.markdown("---")
+st.caption("PNL System — Streamlit + Firebase (month-based version)")
