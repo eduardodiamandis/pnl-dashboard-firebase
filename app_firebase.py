@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from database import (
+from data_firebase import (
     add_trade, add_mtm, add_pos, get_trades, get_mtm, get_positions,
     update_trade, delete_trade, get_position_summary, get_pnl_summary,
     get_unique_values, get_mtm_by_trade
