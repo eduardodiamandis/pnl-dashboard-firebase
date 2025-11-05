@@ -1,4 +1,6 @@
 import streamlit as st
+st.write("Secrets keys:", list(st.secrets.keys()))
+st.stop()
 import pandas as pd
 from decimal import Decimal
 from datetime import datetime
