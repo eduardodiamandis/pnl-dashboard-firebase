@@ -7,8 +7,7 @@ import plotly.express as px
 import streamlit as st
 from data_firebase import get_db
 
-db = get_db()
-st.success("✅ Firebase conectado com sucesso!")
+
 
 
 st.set_page_config(page_title="PNL Dashboard — Firebase", layout="wide")
