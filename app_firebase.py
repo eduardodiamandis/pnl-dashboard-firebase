@@ -1,11 +1,15 @@
-import streamlit as st
-st.write("Secrets keys:", list(st.secrets.keys()))
-st.stop()
+
 import pandas as pd
 from decimal import Decimal
 from datetime import datetime
 from data_firebase import add_trade, add_mtm, add_pos, get_trades, get_mtm, get_positions
 import plotly.express as px
+import streamlit as st
+from data_firebase import get_db
+
+db = get_db()
+st.success("✅ Firebase conectado com sucesso!")
+
 
 st.set_page_config(page_title="PNL Dashboard — Firebase", layout="wide")
 st.title("PNL System ")
