@@ -13,90 +13,182 @@ from data_firebase import get_db
 st.set_page_config(page_title="PNL Dashboard — Firebase", layout="wide")
 st.title("PNL System ")
 
-# --- constantes ---
+# Configuração da página
+st.set_page_config(page_title="PNL Dashboard (Firebase)", layout="wide")
+
+# --- Helpers ---
 PRODUCTS = ["SoyBean", "SoyMeal", "YelCorn"]
 CATEGORIES = ["FOB Vessel", "FOB Paper", "C&F Vessel"]
-SHIPMENTS = ["VSL", "PPR", "CNF"]
+# Agora meses em vez de códigos
+MONTHS = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+]
 
-# --- barra lateral ---
+def get_conversion_value(prod: str) -> Decimal:
+    if prod == "SoyBean":
+        return Decimal("36.7454")
+    elif prod == "SoyMeal":
+        return Decimal("1.1023")
+    elif prod == "YelCorn":
+        return Decimal("39.3678")
+    else:
+        return Decimal("1")
+
+# --- UI ---
+st.title("PNL System — Firebase Edition")
+
 with st.sidebar:
     st.header("Controls")
     current_year = st.number_input("Year", min_value=2000, max_value=2100, value=datetime.now().year)
     prod_sidebar = st.selectbox("Product (quick select)", PRODUCTS)
-    if st.button("Refresh"):
-        st.rerun()
 
-# --- abas ---
+    if "refresh_count" not in st.session_state:
+        st.session_state["refresh_count"] = 0
+
+    if st.button("Refresh / Rerun"):
+        st.session_state["refresh_count"] += 1
+        try:
+            st.rerun()
+        except Exception:
+            st.warning("Não foi possível forçar um rerun automaticamente. Atualize a página manualmente.")
+
 tabs = st.tabs(["Overview", "Insert Trade", "Insert MTM", "Trade Log", "Graphs"])
 
-# --- OVERVIEW ---
+# --- Overview Tab ---
 with tabs[0]:
     st.header("Overview")
-    trades = pd.DataFrame(get_trades())
-    mtm_df = pd.DataFrame(get_mtm())
-    pos_df = pd.DataFrame(get_positions())
+    cols = st.columns(3)
+    for i, prod in enumerate(PRODUCTS):
+        with cols[i]:
+            st.subheader(prod)
+            with st.spinner("Loading data..."):
+                try:
+                    trades = pd.DataFrame(get_trades())
+                    mtm_df = pd.DataFrame(get_mtm())
+                    pos_df = pd.DataFrame(get_positions())
+                except Exception as e:
+                    st.error(f"Erro ao carregar dados: {e}")
+                    trades, mtm_df, pos_df = pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.subheader("Trades")
-        st.dataframe(trades)
-    with col2:
-        st.subheader("MTM")
-        st.dataframe(mtm_df)
-    with col3:
-        st.subheader("Positions")
-        st.dataframe(pos_df)
+            st.markdown("**Trades**")
+            st.dataframe(trades)
 
-# --- INSERT TRADE ---
+            st.markdown("**MTM (Mark-to-Market)**")
+            st.dataframe(mtm_df)
+
+            st.markdown("**Positions**")
+            st.dataframe(pos_df)
+
+# --- Insert Trade Tab ---
 with tabs[1]:
     st.header("Insert Trade")
     with st.form("trade_form"):
-        prod = st.selectbox("Product", PRODUCTS)
+        prod = st.selectbox("Product", PRODUCTS, index=PRODUCTS.index(prod_sidebar))
         op = st.selectbox("Operation", ["Purchase", "Sale"])
         year = st.number_input("Year", min_value=2000, max_value=2100, value=current_year)
-        ton = st.number_input("Tons", min_value=0.0, step=1.0)
-        lvl_pct = st.number_input("Level (%)", min_value=0.0, max_value=100.0)
-        cat = st.selectbox("Category", CATEGORIES)
-        ship = st.selectbox("Shipment", SHIPMENTS)
+        ton = st.number_input("Tons", min_value=0.0, step=1.0, value=1.0)
+        lvl_pct = st.number_input("Level (%)", min_value=0.0, max_value=100.0, value=100.0)
+        categories = st.multiselect("Categories", CATEGORIES, default=CATEGORIES)
+        months = st.multiselect("Months", MONTHS, default=["Jan", "Feb", "Mar"])
         submit_trade = st.form_submit_button("Insert Trade")
 
     if submit_trade:
-        notion = Decimal(str(lvl_pct)) * Decimal(str(ton))
-        add_trade(prod, cat, ship, int(year), op, ton, lvl_pct, float(notion))
-        st.success(f"Trade for {prod} inserted successfully!")
+        try:
+            lvl = Decimal(str(lvl_pct)) / Decimal("100")
+            ton_dec = Decimal(str(ton))
+            conV = get_conversion_value(prod)
+            inserted = 0
+            for cat in categories:
+                for month in months:
+                    notion = conV * lvl * ton_dec
+                    trade_data = {
+                        "product": prod,
+                        "category": cat,
+                        "month": month,
+                        "year": int(year),
+                        "operation": op,
+                        "tons": float(ton),
+                        "level": float(lvl),
+                        "notion": float(notion)
+                    }
+                    add_trade(trade_data)
+                    add_pos({
+                        "product": prod,
+                        "category": cat,
+                        "month": month,
+                        "year": int(year),
+                        "pos": float(ton) if op == "Purchase" else -float(ton)
+                    })
+                    inserted += 1
+            st.success(f"{inserted} trade(s) inserido(s) com sucesso.")
+        except Exception as e:
+            st.error(f"Erro ao inserir trade: {e}")
 
-# --- INSERT MTM ---
+# --- Insert MTM Tab ---
 with tabs[2]:
-    st.header("Insert MTM")
+    st.header("Insert MTM (Mark-to-Market)")
     with st.form("mtm_form"):
-        trade_id = st.text_input("Trade ID")
-        prod = st.selectbox("Product", PRODUCTS, key="mtm_prod")
-        cat = st.selectbox("Category", CATEGORIES, key="mtm_cat")
-        ship = st.selectbox("Shipment", SHIPMENTS, key="mtm_ship")
-        year = st.number_input("Year", min_value=2000, max_value=2100, value=current_year, key="mtm_year")
-        mtm_val = st.number_input("MTM Value", value=0.0)
-        pnl_val = st.number_input("PnL Value", value=0.0)
+        prod_mtm = st.selectbox("Product", PRODUCTS)
+        year_mtm = st.number_input("Year", min_value=2000, max_value=2100, value=current_year, key="year_mtm")
+        mtm_pct = st.number_input("MTM Level (%)", min_value=-100.0, max_value=1000.0, value=0.0)
+        categories_mtm = st.multiselect("Categories", CATEGORIES, default=CATEGORIES, key="cat_mtm")
+        months_mtm = st.multiselect("Months", MONTHS, default=["Jan", "Feb", "Mar"], key="month_mtm")
         submit_mtm = st.form_submit_button("Insert MTM")
-    if submit_mtm:
-        add_mtm(trade_id, prod, cat, ship, int(year), float(mtm_val), float(pnl_val))
-        st.success("MTM record added!")
 
-# --- TRADE LOG ---
+    if submit_mtm:
+        try:
+            mtm = Decimal(str(mtm_pct)) / Decimal("100")
+            updated = 0
+            for cat in categories_mtm:
+                for month in months_mtm:
+                    mtm_data = {
+                        "product": prod_mtm,
+                        "category": cat,
+                        "month": month,
+                        "year": int(year_mtm),
+                        "mtm": float(mtm),
+                        "pnl": float(mtm) * 1000
+                    }
+                    add_mtm(mtm_data)
+                    updated += 1
+            st.success(f"Inserido/atualizado MTM para {updated} entradas.")
+        except Exception as e:
+            st.error(f"Erro ao inserir MTM: {e}")
+
+# --- Trade Log Tab ---
 with tabs[3]:
     st.header("Trade Log")
-    trades_df = pd.DataFrame(get_trades())
-    if not trades_df.empty:
-        st.dataframe(trades_df)
-    else:
-        st.info("No trades recorded yet.")
+    with st.spinner("Loading trade log..."):
+        try:
+            df_trades = pd.DataFrame(get_trades())
+            st.dataframe(df_trades)
+        except Exception as e:
+            st.error(f"Erro ao carregar trade log: {e}")
 
-# --- GRAPHS ---
+# --- Graphs Tab ---
 with tabs[4]:
     st.header("PNL Graphs")
-    df_graph = pd.DataFrame(get_mtm())
-    if df_graph.empty:
-        st.info("No MTM data available yet.")
-    else:
-        df_graph["reg"] = pd.to_datetime(df_graph["reg"])
-        fig = px.line(df_graph, x="reg", y="pnl", color="cat", title="PnL Over Time")
-        st.plotly_chart(fig, use_container_width=True)
+    prod_for_graph = st.selectbox("Product for graph", PRODUCTS)
+    with st.spinner("Loading PNL timeseries..."):
+        try:
+            df_graph = pd.DataFrame(get_mtm())
+            if df_graph.empty:
+                st.info("No PNL timeseries available.")
+            else:
+                df_graph["month"] = pd.Categorical(df_graph["month"], categories=MONTHS, ordered=True)
+                df_graph = df_graph.sort_values("month")
+                fig = px.line(
+                    df_graph,
+                    x="month",
+                    y="pnl",
+                    color="category",
+                    markers=True,
+                    title=f"PNL timeseries — {prod_for_graph}"
+                )
+                st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.error(f"Erro ao gerar gráfico: {e}")
+
+# --- Footer ---
+st.markdown("---")
